@@ -1,0 +1,15 @@
+[settings.kubernetes]
+"cluster-name" = "eks-indtnx-001-k0xv-npge"
+"api-server" = "https://4265AC093FF780C09E52488C480AA54A.yl4.eks-cluster.us-east-1.api.aws"
+"cluster-certificate" = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURCVENDQWUyZ0F3SUJBZ0lJRllPYWRjOTAyNkl3RFFZSktvWklodmNOQVFFTEJRQXdGVEVUTUJFR0ExVUUKQXhNS2EzVmlaWEp1WlhSbGN6QWVGdzB5TmpBeU1UTXhORE13TkRKYUZ3MHpOakF5TVRFeE5ETTFOREphTUJVeApFekFSQmdOVkJBTVRDbXQxWW1WeWJtVjBaWE13Z2dFaU1BMEdDU3FHU0liM0RRRUJBUVVBQTRJQkR3QXdnZ0VLCkFvSUJBUUQxQUw1S3d6UWRZZTg5SWpSeGd3MjduNk45OEdvaWxIcDRQWjFCUW9hT1RaNnlUdFFJUTEyNC9CbW8KZnVOYU5nc3A0cUFwL2svY0k5WXFYOWFKV2czQU5hN29WbGJpN1N0cDVkcFRsL3daS285SUx6emhDVWtvcFdHUAppc1B1cDh4MFR4NlgyNC9UT2I2dXljcHFxM2lLTnR2R3MxM2JGNWxId3NUY01ZMUVqd2pGOUY1b2xqRTdXUEVCCkNwRWZVQXNLWDRyZ2dJdlV6ZWcwQmFtWnVoSU9uRGhPaFkwb3VCYlNDaHQxZEE2THJZdytGRFlsSEhqSUV5ekwKRDZIUzh4RGhQLy9WZDV1TUhVSG1OSXAxbHVvRFl0WFlIaEFxNFZaWmZrL2d3a2lZTVNwRUlXRW5PME9tZmVRMwpHZzdPZ0FSS012OHppOEM2a21jMnJJa1Y2UlhwQWdNQkFBR2pXVEJYTUE0R0ExVWREd0VCL3dRRUF3SUNwREFQCkJnTlZIUk1CQWY4RUJUQURBUUgvTUIwR0ExVWREZ1FXQkJTSmZVT09Za1NjVzNXTmVtcWxkdGhDeDRzMkVqQVYKQmdOVkhSRUVEakFNZ2dwcmRXSmxjbTVsZEdWek1BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQU5CT3FZUmpDNgppMVJoTnptQno3MjdoVXcrbmxVNUhVUlRveHBqY1p2RTVaNWNld2VZY2Q1VTZ6U1lEc3R1M1FQZS81MXFRUVZsCllZUkY5WmN0eWVmdERuVTlkb1huQ1Q5SkdUMHJSeERjT1Y0eXpLTnhhSXZHeEhBZ0ZYbnp4Sm9nbTJCNFp1bE8KQjBIbzhBMHJReTdXT3JxM2cvK1o5YU5DdEV5R2swZEg3N0NMYThDQXg5aW0wYnhtdE1xUStrSzVQaFVIcER0SAo5bnh5REJ1UWFQQTRsYnV2N0hiaDUvZ3pTOFNmQUhPVlBPVkNCc2t4Q1pPYXVZQk9zNmo5VkRhelJNeWxsZGVhCndva2p1RGtTeHRWK3RNd3IrT2xwSU5aQkFPN29OT3R5MnBNRnVzMzY3TjNEVXNtRk9GVEd0bmRvVkd1UmpjcUsKeHNmTVIveGJwb00xCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K"
+"cluster-dns-ip" = "fda6:6d44:73db::a"
+[settings.kubernetes.node-labels]
+"eks.amazonaws.com/nodegroup-image" = "ami-0ae5025aececec1a4"
+"eks.amazonaws.com/capacityType" = "ON_DEMAND"
+"eks.amazonaws.com/nodegroup" = "karpenter-ng"
+[settings.network]
+https-proxy = "http://proxy.ebiz.verizon.com:9290"
+no-proxy = ["localhost", ".api.aws", "127.0.0.1", "169.254.169.254","172.20.0.1","10.100.0.1", ".eks.amazonaws.com","autoscaling.us-east-1.amazonaws.com", "ec2.us-east-1.amazonaws.com", "sts.us-east-1.amazonaws.com", "s3.us-east-1.amazonaws.com", "elasticfilesystem.us-east-1.amazonaws.com", "ebiz.verizon.com", ".verizon.com", ".vzwcorp.com", ".vzbi.com" ]  
+[settings.dns]
+name-servers = ["127.0.0.1", "169.254.169.253"]
+search-list = ["ebiz.verizon.com","verizon.com","vpc.verizon.com","vzbi.com","tdc.vzwcorp.com","sdc.vzwcorp.com","odc.vzwcorp.com"]
