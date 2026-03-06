@@ -51,12 +51,28 @@ variable "cluster_tags" {
   default = {}
 }
 
+variable "cluster_sg_tags" {
+  type    = map(string)
+  default = {}
+}
+
 variable "node_groups" {
   type = map(object({
+    ami_id        = string
     instance_type = string
     min_size      = number
     max_size      = number
     desired_size  = number
     tags          = map(string)
   }))
+}
+
+variable "launch_template_tags" {
+  type    = map(string)
+  default = {}
+}
+
+variable "asg_tags" {
+  type    = map(string)
+  default = {}
 }
