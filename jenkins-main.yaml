@@ -1,0 +1,504 @@
+---
+# ==============================================================================
+# VZCloudAIO - Full Data Extraction 
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. INITIALIZATION & PATHS
+# ------------------------------------------------------------------------------
+- name: Generate Run ID
+  set_fact:
+    run_id: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
+
+- name: Define Storage Paths
+  set_fact:
+    # WORKING DIRECTORY: Unique per run
+    base_root: "/tmp/vz_aio_{{ run_id }}"
+    run_dir: "/tmp/vz_aio_{{ run_id }}"
+    state_dir: "/tmp/vz_aio_{{ run_id }}/state"
+    dir_fragments: "/tmp/vz_aio_{{ run_id }}/fragments"
+    dir_kubeconfigs: "/tmp/vz_aio_{{ run_id }}/kubeconfigs"
+    dir_logs: "/tmp/vz_aio_{{ run_id }}/logs"
+    dir_raw_json: "/tmp/vz_aio_{{ run_id }}/cluster_dir"
+    
+    # Status Files
+    csv_completed: "/tmp/vz_aio_{{ run_id }}/state/completed-clusters.csv"
+    csv_failed: "/tmp/vz_aio_{{ run_id }}/state/failed-clusters.csv"
+    
+    # Final Report
+    master_report: "/tmp/vz_aio_{{ run_id }}/aggregated_workloads.csv"
+    
+    # OUTPUT DESTINATION: Shared directory
+    output_zip_dir: "/tmp/zips"
+    output_zip: "/tmp/zips/{{ Portfolio }}_{{ env | default('ENV') }}_{{ Bosun_Release }}_{{ region }}_{{ run_id }}.zip"
+    
+    # Scripts
+    raw_clusters_file: "/tmp/vz_aio_{{ run_id }}/raw_cluster_data.json"
+    filter_script_path: "/tmp/vz_aio_{{ run_id }}/filter_clusters.py"
+
+# ------------------------------------------------------------------------------
+# 2. PREPARE CREDENTIALS
+# ------------------------------------------------------------------------------
+- debug: var=Bosun_Release
+- debug: var=Rerun_Bosun_Release
+
+- name: Define Role Session Name
+  set_fact:
+    role_session_name: "{{ Portfolio }}_{{ env | default('np') }}_{{ run_id }}"
+
+# 1. Always Fetch Legacy (v9) Credentials
+- name: Fetch Legacy Credentials (v9)
+  delegate_to: localhost
+  get_awskeys:
+    account_name: "{{ Portfolio }}"
+    account_type: "{{ env }}"
+    secret_key: "{{ ansplus_secret }}" 
+    session_user: "{{ UserID }}"
+    session_id: "{{ role_session_name }}_v9"
+  register: creds_v9
+
+# 2. Always Fetch Modern (v10/v11) Credentials
+- name: Fetch Modern Credentials (v10/v11)
+  delegate_to: localhost
+  get_awskeys:
+    account_name: "{{ Portfolio }}"
+    account_type: "{{ env }}"
+    secret_key: "{{ eks_ansplus_secret }}"
+    session_user: "{{ UserID }}"
+    session_id: "{{ role_session_name }}_v10"
+  register: creds_modern
+
+# 3. Determine PRIMARY Credentials for this Run Context (Discovery Phase)
+- name: Set Primary Credentials to Legacy (if v9)
+  set_fact:
+    aws_creds: "{{ creds_v9 }}"
+  when: Bosun_Release == 'v9'
+
+- name: Set Primary Credentials to Modern (if v10 or v11)
+  set_fact:
+    aws_creds: "{{ creds_modern }}"
+  when: Bosun_Release != 'v9'
+
+- name: Setting Up Variables for Shell
+  set_fact:
+    ACCESSKEY: "{{ aws_creds.access_key }}"
+    SECRETKEY: "{{ aws_creds.secret_key }}"
+    TOKEN: "{{ aws_creds.session_token }}"
+
+- name: Add AWS access/token keys to the environment
+  set_fact:
+    cli_env: "{{ cli_env | default({}) | combine({ 'AWS_ACCESS_KEY_ID': ACCESSKEY, 'AWS_SECRET_ACCESS_KEY': SECRETKEY, 'AWS_SESSION_TOKEN': TOKEN }) }}"
+
+# ------------------------------------------------------------------------------
+# 3. DIRECTORY SETUP
+# ------------------------------------------------------------------------------
+- name: Ensure Shared Output Directory (Open Permissions)
+  file:
+    path: "{{ output_zip_dir }}"
+    state: directory
+    mode: '0777'
+
+- name: Create Ephemeral Run Directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ run_dir }}"
+    - "{{ state_dir }}"
+    - "{{ dir_fragments }}"
+    - "{{ dir_kubeconfigs }}"
+    - "{{ dir_logs }}"
+    - "{{ dir_raw_json }}"
+
+- name: Initialize State Files
+  copy:
+    content: "cluster_name,environment,region,status,timestamp,release_version\n"
+    dest: "{{ item }}"
+    force: true
+  loop:
+    - "{{ csv_completed }}"
+    - "{{ csv_failed }}"
+
+# ------------------------------------------------------------------------------
+# 4. DISCOVERY
+# ------------------------------------------------------------------------------
+- name: List EKS clusters
+  environment: "{{ cli_env }}"
+  command: "aws eks list-clusters --region {{ region }} --output json"
+  register: eks_clusters_raw
+  changed_when: false
+
+- name: Check if EKS clusters were found
+  fail:
+    msg: "No EKS clusters found in region {{ region }}."
+  when:
+    - eks_clusters_raw.rc != 0 or not (eks_clusters_raw.stdout | default('') | from_json | json_query('clusters'))
+
+- name: Get details for each EKS cluster
+  environment: "{{ cli_env }}"
+  command: "aws eks describe-cluster --name {{ item | split('/') | last }} --region {{ region }} --output json"
+  loop: "{{ eks_clusters_raw.stdout | from_json | json_query('clusters') }}"
+  loop_control:
+    loop_var: item  
+  register: eks_cluster_details_raw
+  ignore_errors: yes
+  changed_when: false
+
+- name: Save Raw Cluster Data
+  copy:
+    content: "{{ eks_cluster_details_raw | to_json }}"
+    dest: "{{ raw_clusters_file }}"
+
+- name: Deploy Cluster Processor Script
+  copy:
+    dest: "{{ filter_script_path }}"
+    mode: '0755'
+    content: |
+      import sys, json
+
+      RAW_FILE = sys.argv[1]
+      
+      try:
+          with open(RAW_FILE) as f: data = json.load(f)
+          final_list = []
+          for result in data.get('results', []):
+              if result.get('rc') != 0: continue
+              try:
+                  c = json.loads(result.get('stdout', '{}')).get('cluster', {})
+                  name = c.get('name')
+                  
+                  if not name: continue
+                  final_list.append({'name': name})
+              except: continue
+          print(json.dumps(final_list))
+      except Exception as e: sys.exit(1)
+
+- name: Execute Cluster Processor Script
+  command: "python3 {{ filter_script_path }} {{ raw_clusters_file }}"
+  register: python_filter_output
+
+- name: Set Target Clusters
+  set_fact:
+    target_eks_clusters: "{{ python_filter_output.stdout | from_json }}"
+
+- name: Operational Summary
+  debug:
+    msg: 
+      - "Run ID: {{ run_id }}"
+      - "Storage Path: {{ run_dir }}"
+      - "Total Scanned: {{ eks_cluster_details_raw.results | length }}"
+      - "Total Selected: {{ target_eks_clusters | length }}"
+      - "Clusters: {{ target_eks_clusters | map(attribute='name') | list }}"
+
+# ------------------------------------------------------------------------------
+# 5. DEPLOY WORKER
+# ------------------------------------------------------------------------------
+- name: Deploy Worker Script
+  copy:
+    dest: "{{ run_dir }}/worker.py"
+    mode: '0755'
+    content: |
+      import sys, json, csv, subprocess, os
+
+      # --- ARGUMENTS ---
+      CLUSTER = sys.argv[1]
+      KUBECONFIG_PATH = sys.argv[2]
+      OUTPUT_CSV = sys.argv[3]
+      REGION = sys.argv[4]
+      ENVIRONMENT = sys.argv[5]
+      INPUT_VERSION = sys.argv[6]
+      
+      # --- INJECTED CREDENTIALS ---
+      V9_AK = "{{ creds_v9.access_key | default('') }}"
+      V9_SK = "{{ creds_v9.secret_key | default('') }}"
+      V9_TK = "{{ creds_v9.session_token | default('') }}"
+
+      MOD_AK = "{{ creds_modern.access_key | default('') }}"
+      MOD_SK = "{{ creds_modern.secret_key | default('') }}"
+      MOD_TK = "{{ creds_modern.session_token | default('') }}"
+      
+      # Base Environment (Contains the PRIMARY credentials for this run)
+      BASE_ENV = os.environ.copy()
+      BASE_ENV['KUBECONFIG'] = KUBECONFIG_PATH
+
+      # Updated Header: bosun_auth instead of bosun_release
+      CSV_HEADERS = [
+          "cluster", "environment", "region", "bosun_auth", 
+          "kind", "namespace", "name", 
+          "helm_used", "pods_defined", "container", "image", 
+          "cpu_req", "cpu_lim", "mem_req", "mem_lim", 
+          "classification", "tier", "metadata_1", "metadata_2",
+          "kube.verizon.com/app-id", "kube.verizon.com/name", 
+          "kube.verizon.com/portfolio", "kube.verizon.com/vsad",
+          "meta.helm.sh/release-name", "meta.helm.sh/release-namespace"
+      ]
+
+      def log(msg):
+          print(f"[{CLUSTER}] {msg}", flush=True)
+
+      def generate_kubeconfig(env_vars):
+          subprocess.check_call(
+              ["aws", "eks", "update-kubeconfig", "--name", CLUSTER, "--region", REGION, "--kubeconfig", KUBECONFIG_PATH],
+              env=env_vars, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+          )
+
+      def check_access(env_vars):
+          try:
+              subprocess.check_output(
+                  ["kubectl", "get", "svc", "kubernetes", "-n", "default", "--request-timeout=5s"], 
+                  env=env_vars, stderr=subprocess.DEVNULL
+              )
+              return True
+          except:
+              return False
+
+      def get_data(env_vars):
+          cmd = [
+              "kubectl", "get", 
+              "deployments,statefulsets,daemonsets,cronjobs,services,ingresses,persistentvolumeclaims", 
+              "--all-namespaces", "-o", "json",
+              "--insecure-skip-tls-verify=true", "--request-timeout=60s"
+          ]
+          return subprocess.check_output(cmd, env=env_vars, stderr=subprocess.STDOUT).decode('utf-8')
+
+      try:
+          valid_env = None
+          auth_version = "Unknown"
+
+          # 1. Try Default/Primary
+          log("Attempt 1: Auth (Primary/Default)...")
+          try:
+              generate_kubeconfig(BASE_ENV)
+              if check_access(BASE_ENV):
+                  log("Success: Primary Credentials")
+                  valid_env = BASE_ENV
+                  # Map input to generalized auth bucket
+                  if INPUT_VERSION == 'v9':
+                      auth_version = "v9"
+                  else:
+                      auth_version = "v10/v11"
+          except Exception: 
+              pass
+
+          # 2. Try Legacy (v9)
+          if not valid_env and V9_AK:
+              log("Attempt 2: Auth (Legacy v9)...")
+              V9_ENV = BASE_ENV.copy()
+              V9_ENV['AWS_ACCESS_KEY_ID'] = V9_AK
+              V9_ENV['AWS_SECRET_ACCESS_KEY'] = V9_SK
+              V9_ENV['AWS_SESSION_TOKEN'] = V9_TK
+              try:
+                  generate_kubeconfig(V9_ENV)
+                  if check_access(V9_ENV):
+                      log("Success: Legacy v9 Credentials")
+                      valid_env = V9_ENV
+                      auth_version = "v9"
+              except Exception: 
+                  pass
+
+          # 3. Try Modern (v10/v11)
+          if not valid_env and MOD_AK:
+              log("Attempt 3: Auth (Modern v10/v11)...")
+              MOD_ENV = BASE_ENV.copy()
+              MOD_ENV['AWS_ACCESS_KEY_ID'] = MOD_AK
+              MOD_ENV['AWS_SECRET_ACCESS_KEY'] = MOD_SK
+              MOD_ENV['AWS_SESSION_TOKEN'] = MOD_TK
+              try:
+                  generate_kubeconfig(MOD_ENV)
+                  if check_access(MOD_ENV):
+                      log("Success: Modern v10/v11 Credentials")
+                      valid_env = MOD_ENV
+                      auth_version = "v10/v11"
+              except Exception: 
+                  pass
+          
+          if not valid_env:
+              log("FATAL: All authentication methods failed (Primary, v9, and v10/v11).")
+              sys.exit(1)
+
+          # --- DATA EXTRACTION ---
+          out = get_data(valid_env)
+          try:
+              data = json.loads(out)
+          except json.JSONDecodeError:
+              log("FATAL: Failed to decode JSON output from kubectl.")
+              sys.exit(1)
+          
+          rows = []
+          for item in data.get("items", []):
+              md = item.get("metadata", {})
+              spec = item.get("spec", {})
+              ns = md.get("namespace")
+              kind = item.get("kind")
+              name = md.get("name")
+
+              if ns in ["kube-system", "fluent-system"]: continue
+
+              helm_used = "No"
+              helm_rel = ""
+              helm_ns = ""
+              
+              def get_meta(key): 
+                  return md.get("labels", {}).get(key) or md.get("annotations", {}).get(key) or ""
+              
+              if get_meta("app.kubernetes.io/managed-by").lower() == "helm": helm_used = "Yes"
+              if get_meta("meta.helm.sh/release-name"): 
+                  helm_used = "Yes"
+                  helm_rel = get_meta("meta.helm.sh/release-name")
+                  helm_ns = get_meta("meta.helm.sh/release-namespace")
+
+              app_id = get_meta("kube.verizon.com/app-id")
+              app_name = get_meta("kube.verizon.com/name")
+              portfolio = get_meta("kube.verizon.com/portfolio")
+              vsad = get_meta("kube.verizon.com/vsad")
+
+              containers = []
+              pods_defined = 0
+              classification = "Stateless"
+              meta1 = ""
+              meta2 = ""
+
+              if kind in ["Deployment", "StatefulSet", "DaemonSet"]:
+                  if kind == "StatefulSet": classification = "Stateful"
+                  pods_defined = spec.get("replicas", 0)
+                  containers = spec.get("template", {}).get("spec", {}).get("containers", [])
+              elif kind == "CronJob":
+                  containers = spec.get("jobTemplate", {}).get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+                  pods_defined = 1
+              elif kind == "Service":
+                  classification = "Network"
+                  pods_defined = "N/A"
+                  meta1 = spec.get("type", "ClusterIP")
+                  ports = spec.get("ports", [])
+                  meta2 = ",".join([str(p.get("port")) for p in ports])
+                  containers = [{"name": "N/A"}]
+              elif kind == "Ingress":
+                  classification = "Network"
+                  pods_defined = "N/A"
+                  rules = spec.get("rules", [])
+                  hosts = [r.get("host", "*") for r in rules]
+                  meta2 = f"Hosts:{','.join(hosts)}"
+                  containers = [{"name": "N/A"}]
+              elif kind == "PersistentVolumeClaim":
+                  classification = "Storage"
+                  pods_defined = "N/A"
+                  meta1 = spec.get("storageClassName", "")
+                  meta2 = spec.get("resources", {}).get("requests", {}).get("storage", "")
+                  containers = [{"name": "N/A"}]
+              
+              if not containers: containers = [{}]
+
+              for c in containers:
+                  c_name = c.get("name", "N/A")
+                  c_image = c.get("image", "N/A")
+                  cpu_req = ""
+                  cpu_lim = ""
+                  mem_req = ""
+                  mem_lim = ""
+
+                  if c_name != "N/A":
+                      res = c.get("resources", {})
+                      cpu_req = res.get("requests", {}).get("cpu", "")
+                      cpu_lim = res.get("limits", {}).get("cpu", "")
+                      mem_req = res.get("requests", {}).get("memory", "")
+                      mem_lim = res.get("limits", {}).get("memory", "")
+
+                  rows.append({
+                      "cluster": CLUSTER, "environment": ENVIRONMENT, "region": REGION, 
+                      "bosun_auth": auth_version, # UPDATED COLUMN
+                      "kind": kind, "namespace": ns, "name": name,
+                      "helm_used": helm_used, "pods_defined": pods_defined,
+                      "container": c_name, "image": c_image,
+                      "cpu_req": cpu_req, "cpu_lim": cpu_lim, "mem_req": mem_req, "mem_lim": mem_lim,
+                      "classification": classification, "tier": "Multi-Tenant",
+                      "metadata_1": meta1, "metadata_2": meta2,
+                      "kube.verizon.com/app-id": app_id, "kube.verizon.com/name": app_name,
+                      "kube.verizon.com/portfolio": portfolio, "kube.verizon.com/vsad": vsad,
+                      "meta.helm.sh/release-name": helm_rel, "meta.helm.sh/release-namespace": helm_ns
+                  })
+
+          with open(OUTPUT_CSV, "w", newline="") as f:
+              writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
+              writer.writeheader()
+              writer.writerows(rows)
+
+      except Exception as e:
+          log(f"ERROR: {e}")
+          sys.exit(1)
+
+# ------------------------------------------------------------------------------
+# 6. EXECUTION
+# ------------------------------------------------------------------------------
+- name: Dispatch Workers (Async)
+  environment: "{{ cli_env }}"
+  command: >
+    python3 {{ run_dir }}/worker.py
+    "{{ item.name }}" 
+    "{{ dir_kubeconfigs }}/config_{{ item.name }}" 
+    "{{ dir_fragments }}/{{ item.name }}.csv"
+    "{{ region }}"
+    "{{ env | default('NONPROD') }}"
+    "{{ Bosun_Release }}"
+  loop: "{{ target_eks_clusters }}"
+  async: 1200
+  poll: 0
+  register: worker_jobs
+
+- name: Wait for Workers
+  async_status:
+    jid: "{{ item.ansible_job_id }}"
+  register: job_result
+  until: job_result.finished
+  retries: 120
+  delay: 10
+  loop: "{{ worker_jobs.results }}"
+  ignore_errors: true
+
+# ------------------------------------------------------------------------------
+# 7. REPORTING
+# ------------------------------------------------------------------------------
+- name: Track Results
+  lineinfile:
+    path: "{{ csv_completed if (item.rc | int == 0) else csv_failed }}"
+    line: "{{ item.item.item.name }},{{ env | default('NONPROD') }},{{ region }},{{ 'SUCCESS' if (item.rc | int == 0) else 'FAILED' }},{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }},{{ Bosun_Release }}"
+    insertafter: EOF
+  loop: "{{ job_result.results }}"
+
+- name: REPORT - Completed Clusters
+  command: "cat {{ csv_completed }}"
+  register: cat_completed
+  ignore_errors: true
+
+- name: REPORT - Failed Clusters
+  command: "cat {{ csv_failed }}"
+  register: cat_failed
+  ignore_errors: true
+
+- name: Console Summary
+  debug:
+    msg:
+      - "--- SUCCESSFUL CLUSTERS ---"
+      - "{{ cat_completed.stdout_lines }}"
+      - "---------------------------"
+      - "--- FAILED CLUSTERS ---"
+      - "{{ cat_failed.stdout_lines }}"
+      - "-----------------------"
+
+- name: Aggregate Reports
+  shell: "cat {{ dir_fragments }}/*.csv | head -n 1 > {{ master_report }} && tail -n +2 -q {{ dir_fragments }}/*.csv >> {{ master_report }}"
+  ignore_errors: true
+
+- name: Package Artifacts
+  archive:
+    path: 
+      - "{{ master_report }}"
+      - "{{ csv_completed }}"
+      - "{{ csv_failed }}"
+    dest: "{{ output_zip }}"
+    format: zip
+  ignore_errors: true
+
+- name: Final Success Message
+  debug:
+    msg: "Run {{ run_id }} complete. Zip saved to {{ output_zip }}."
