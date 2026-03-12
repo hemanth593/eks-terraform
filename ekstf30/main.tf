@@ -27,7 +27,21 @@ resource "aws_eks_cluster" "main" {
     ip_family = "ipv6"
   }
 
-  tags = var.cluster_tags
+  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
+  encryption_config {
+    provider {
+      key_arn = var.kms_key_arn
+    }
+    resources = ["secrets"]
+  }
+
+  tags = merge(
+    var.cluster_tags,
+    {
+      Name = var.cluster_name
+    }
+  )
 }
 
 locals {
@@ -56,6 +70,7 @@ resource "aws_security_group_rule" "cluster_sg_rules" {
   from_port                = each.value.from_port
   to_port                  = each.value.to_port
   protocol                 = each.value.protocol
+  description              = each.value.description
   security_group_id        = local.cluster_sg_id
   source_security_group_id = local.cluster_sg_id
 
@@ -116,7 +131,7 @@ resource "aws_launch_template" "node_group" {
   metadata_options {
     http_endpoint               = "enabled"
     http_tokens                 = "required"
-    http_put_response_hop_limit = 2
+    http_put_response_hop_limit = 1
     http_protocol_ipv6          = "enabled"
     instance_metadata_tags      = "enabled"
   }
