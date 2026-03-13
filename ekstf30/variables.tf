@@ -24,9 +24,10 @@ variable "additional_security_groups" {
 
 variable "cluster_sg_rules" {
   type = list(object({
-    protocol  = string
-    from_port = number
-    to_port   = number
+    protocol    = string
+    from_port   = number
+    to_port     = number
+    description = string
   }))
 }
 
@@ -75,4 +76,9 @@ variable "launch_template_tags" {
 variable "asg_tags" {
   type    = map(string)
   default = {}
+}
+
+variable "kms_key_arn" {
+  type        = string
+  description = "ARN of the KMS key for EKS secrets encryption"
 }
