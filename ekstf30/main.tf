@@ -42,6 +42,10 @@ resource "aws_eks_cluster" "main" {
       Name = var.cluster_name
     }
   )
+
+  lifecycle {
+    ignore_changes = [vpc_config[0].security_group_ids]
+  }
 }
 
 locals {
@@ -53,6 +57,8 @@ resource "aws_ec2_tag" "cluster_sg_name" {
   resource_id = local.cluster_sg_id
   key         = "Name"
   value       = "eks-cluster-sg-${var.cluster_name}-${local.date_suffix}"
+
+  depends_on = [aws_eks_cluster.main]
 }
 
 resource "aws_ec2_tag" "cluster_sg_tags" {
@@ -61,6 +67,19 @@ resource "aws_ec2_tag" "cluster_sg_tags" {
   resource_id = local.cluster_sg_id
   key         = each.key
   value       = each.value
+
+  depends_on = [aws_eks_cluster.main]
+}
+
+resource "null_resource" "wait_for_tags" {
+  depends_on = [
+    aws_ec2_tag.cluster_sg_name,
+    aws_ec2_tag.cluster_sg_tags
+  ]
+
+  provisioner "local-exec" {
+    command = "timeout /t 5 /nobreak > nul"
+  }
 }
 
 resource "aws_security_group_rule" "cluster_sg_rules" {
@@ -74,7 +93,7 @@ resource "aws_security_group_rule" "cluster_sg_rules" {
   security_group_id        = local.cluster_sg_id
   source_security_group_id = local.cluster_sg_id
 
-  depends_on = [aws_ec2_tag.cluster_sg_name, aws_ec2_tag.cluster_sg_tags]
+  depends_on = [null_resource.wait_for_tags]
 }
 
 data "aws_eks_cluster" "main" {
@@ -131,7 +150,7 @@ resource "aws_launch_template" "node_group" {
   metadata_options {
     http_endpoint               = "enabled"
     http_tokens                 = "required"
-    http_put_response_hop_limit = 1
+    http_put_response_hop_limit = 2
     http_protocol_ipv6          = "enabled"
     instance_metadata_tags      = "enabled"
   }
