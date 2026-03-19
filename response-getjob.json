@@ -1,0 +1,93 @@
+{
+  "id": 858,
+  "auditid": 49794918,
+  "stackid": 267,
+  "tfaction": "apply",
+  "params": {},
+  "params_file": "terraform.tfvars.json",
+  "outputs": {
+    "cluster_endpoint": {
+      "sensitive": false,
+      "value": "https://E11831EED068C1227C6A84FBC4DD6195.gr7.eks-cluster.us-east-1.api.aws"
+    },
+    "cluster_id": {
+      "sensitive": false,
+      "value": "eks-pagidhe-t5-k0xv-npge"
+    },
+    "cluster_security_group_id": {
+      "sensitive": false,
+      "value": "sg-09b1e4a147a4a0e10"
+    },
+    "cluster_security_group_name": {
+      "sensitive": false,
+      "value": "eks-cluster-sg-eks-pagidhe-t5-k0xv-npge-120326"
+    }
+  },
+  "resources": [
+    {
+      "tf_name": "main",
+      "tf_type": "aws_eks_cluster",
+      "resource_name": "eks-pagidhe-t5-k0xv-npge",
+      "resource_id": "eks-pagidhe-t5-k0xv-npge"
+    },
+    {
+      "tf_name": "addons",
+      "tf_type": "aws_eks_addon",
+      "resource_name": null,
+      "resource_id": "eks-pagidhe-t5-k0xv-npge:aws-guardduty-agent"
+    },
+    {
+      "tf_name": "addons",
+      "tf_type": "aws_eks_addon",
+      "resource_name": null,
+      "resource_id": "eks-pagidhe-t5-k0xv-npge:eks-node-monitoring-agent"
+    },
+    {
+      "tf_name": "addons",
+      "tf_type": "aws_eks_addon",
+      "resource_name": null,
+      "resource_id": "eks-pagidhe-t5-k0xv-npge:eks-pod-identity-agent"
+    },
+    {
+      "tf_name": "addons",
+      "tf_type": "aws_eks_addon",
+      "resource_name": null,
+      "resource_id": "eks-pagidhe-t5-k0xv-npge:kube-proxy"
+    },
+    {
+      "tf_name": "addons",
+      "tf_type": "aws_eks_addon",
+      "resource_name": null,
+      "resource_id": "eks-pagidhe-t5-k0xv-npge:vpc-cni"
+    },
+    {
+      "tf_name": "main",
+      "tf_type": "aws_eks_cluster",
+      "resource_name": "eks-pagidhe-t5-k0xv-npge",
+      "resource_id": "eks-pagidhe-t5-k0xv-npge"
+    },
+    {
+      "tf_name": "node_group",
+      "tf_type": "aws_launch_template",
+      "resource_name": "eks-pagidhe-t5-k0xv-npge-argocd-ng-lt",
+      "resource_id": "lt-0868fa6d1a5623f33"
+    },
+    {
+      "tf_name": "node_group",
+      "tf_type": "aws_launch_template",
+      "resource_name": "eks-pagidhe-t5-k0xv-npge-pagidhe-ng-lt",
+      "resource_id": "lt-06bd108faa47e83c1"
+    }
+  ],
+  "start_time": "2026-03-12 21:03:28.750546+00:00",
+  "end_time": "2026-03-12 21:22:09.289458+00:00",
+  "job_status": "FAILED",
+  "tfconfig_s3path": "tfstate/aws/K0XV/vz-it-np-k20v-cnsa2/us-east-1/eks-pagidhe-t2-k0xv-npge/49794918",
+  "gitrepourl": "git@gitlab.verizon.com:eks/2.0.git",
+  "gitbranch": "feature/eks-terraform",
+  "templdirpath": "eks-terraform-2.0/",
+  "tftargets": null,
+  "stack_name": "eks-pagidhe-t2-k0xv-npge",
+  "account_name": "vz-it-np-k20v-cnsa2",
+  "region": "us-east-1"
+}
