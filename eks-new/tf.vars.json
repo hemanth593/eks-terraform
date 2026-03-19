@@ -1,0 +1,72 @@
+{
+  "cluster_name": "eks-pagidhe-001",
+  "kubernetes_version": "1.34",
+  "vpc_id": "vpc-0cf4562cbbede5f48",
+  "subnet_ids": [
+    "subnet-04a135628c62b74a2",
+    "subnet-0f63b793a303c16e6"
+  ],
+  "cluster_role_arn": "arn:aws:iam::198331371273:role/eks-cluster",
+  "node_role_arn": "arn:aws:iam::198331371273:role/eks-instance",
+  "node_instance_types": [
+    "m5.large"
+  ],
+  "node_desired_size": 2,
+  "addons": [
+    {
+      "name": "vpc-cni"
+    },
+    {
+      "name": "coredns"
+    },
+    {
+      "name": "kube-proxy"
+    }
+  ],
+  "karpenter_version": "1.9.0",
+  "argocd_version": "7.8.0",
+  "tags": {
+    "environment": "staging",
+    "network": "dualstack"
+  },
+  "ip_family": "ipv6",
+  "additional_security_group_ids": [
+    "sg-0a599791328b5a194",
+    "sg-06b92d16cf5ea494f"
+  ],
+  "cluster_sg_rules": [
+    {
+      "protocol": "tcp",
+      "from_port": 443,
+      "to_port": 443,
+      "description": "HTTPS for API server"
+    },
+    {
+      "protocol": "tcp",
+      "from_port": 53,
+      "to_port": 53,
+      "description": "TCP DNS"
+    },
+    {
+      "protocol": "udp",
+      "from_port": 53,
+      "to_port": 53,
+      "description": "UDP DNS"
+    },
+    {
+      "protocol": "tcp",
+      "from_port": 1025,
+      "to_port": 65535,
+      "description": "Ephemeral ports"
+    }
+  ],
+  "node_security_group_ids": [
+    "sg-0a599791328b5a194",
+    "sg-06b92d16cf5ea494f"
+  ],
+  "ebs_config": {
+    "volume_size": 50,
+    "volume_type": "gp3",
+    "encrypted": true
+  }
+}
